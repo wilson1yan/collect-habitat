@@ -1,9 +1,15 @@
 from typing import Dict, Generator, List, Optional, Sequence, Tuple, Union
+from tqdm import tqdm
+import os
+import os.path as osp
 import habitat
 import numpy as np
 import cv2
 import quaternion
 import skvideo.io
+import multiprocessing as mp
+import argparse
+import glob
 
 from habitat.core.simulator import ShortestPathPoint
 from habitat.tasks.nav.nav import NavigationEpisode, NavigationGoal
@@ -51,6 +57,7 @@ def generate_pointnav_episode(
         source_rotation = quaternion_to_list(sim.agents[0].get_state().rotation)
     elif source_mode == 'random':
         source_position = sim.sample_navigable_point()
+        angle = np.random.uniform(0, 2 * np.pi)
         source_rotation = [0.0, np.sin(angle / 2), 0, np.cos(angle / 2)]
     else:
         raise Exception(source_mode)
@@ -100,31 +107,65 @@ def generate_pointnav_episode(
     return episode
 
 
-def main(scene):
-    cfg = habitat.get_config()
-    cfg.defrost()
-    cfg.SIMULATOR.SCENE = scene
-    cfg.freeze()
-
-    sim = habitat.sims.make_sim("Sim-v0", config=cfg.SIMULATOR)
-    out = generate_pointnav_episode(sim, source_mode='sim')
-    out2 = generate_pointnav_episode(sim, source_mode='sim', target_position=out.start_position, target_rotation=out.start_rotation)
+def gen_traj(sim, ep_len=500):
+    out = generate_pointnav_episode(sim, source_mode='random')
+    start_position, start_rotation = out.start_position, out.start_rotation
     actions = [point.action for point in out.shortest_paths[0]]
-    actions.extend([point.action for point in out2.shortest_paths[0]])
+    while len(actions) < ep_len:
+        out = generate_pointnav_episode(sim, source_mode='sim')
+        actions.extend([point.action for point in out.shortest_paths[0]])
+    return actions[:ep_len], (start_position, start_rotation)
 
-    sim.reset()
-    sim.set_agent_state(out.start_position, out.start_rotation)
 
-    video = []
-    for act in actions:
-        obs = sim.step(act)
-        video.append(obs['rgb'])
+def main(scenes):
+    total = len(scenes) * args.n_traj
+    n = 0
+    for scene in scenes:
+        name = osp.basename(scene)[:-3]
 
-    video = np.stack(video, axis=0)
-    print(video.shape)
+        cfg = habitat.get_config()
+        cfg.defrost()
+        cfg.SIMULATOR.SCENE = scene
+        cfg.freeze()
 
-    skvideo.io.vwrite('video.mp4', video)
+        sim = habitat.sims.make_sim("Sim-v0", config=cfg.SIMULATOR)
+        sim.seed(args.seed)
+        for i in range(args.n_traj):
+            output_path = osp.join(args.output, f'{name}_{i}')
+            actions, (start_position, start_rotation) = gen_traj(sim)
 
+            sim.reset()
+            sim.set_agent_state(start_position, start_rotation)
+
+            video = []
+            for act in actions:
+                obs = sim.step(act)['rgb']
+                H, W = obs.shape[:2]
+                L = min(H, W)
+                ih = (H - L) // 2
+                iw = (W - L) // 2
+                obs = obs[ih:ih+L, iw:iw+L]
+                obs = cv2.resize(obs, dsize=(args.resolution, args.resolution), interpolation=cv2.INTER_LINEAR)
+                video.append(obs)
+            video = np.stack(video, axis=0)
+            print(video.shape)
+            actions = np.array(actions).astype(np.int32)
+
+            skvideo.io.vwrite(output_path + '.mp4', video)
+            np.save(output_path + '.npy', actions)
+            n += 1
+
+            print(f'completed {n}/{total}')
+        sim.close()
 
 if __name__ == '__main__':
-    main('scene_datasets/habitat-test-scenes/apartment_1.glb')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-n', '--n_traj', type=int, default=10)
+    parser.add_argument('-r', '--resolution', type=int, default=256)
+    parser.add_argument('-o', '--output', type=str, default='/shared/wilson/datasets/habitat_samples')
+    parser.add_argument('-s', '--seed', type=int, default=0)
+    args = parser.parse_args()
+
+    os.makedirs(args.output, exist_ok=True)
+    paths = glob.glob('/shared/wilson/datasets/gibson/*.glb')
+    main(paths)
