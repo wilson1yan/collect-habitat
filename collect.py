@@ -121,7 +121,7 @@ def main(scenes):
     total = len(scenes) * args.n_traj
     n = 0
     for scene in scenes:
-        name = osp.basename(scene)[:-3]
+        name = osp.basename(scene)[:-4]
 
         cfg = habitat.get_config()
         cfg.defrost()
@@ -148,7 +148,6 @@ def main(scenes):
                 obs = cv2.resize(obs, dsize=(args.resolution, args.resolution), interpolation=cv2.INTER_LINEAR)
                 video.append(obs)
             video = np.stack(video, axis=0)
-            print(video.shape)
             actions = np.array(actions).astype(np.int32)
 
             skvideo.io.vwrite(output_path + '.mp4', video)
