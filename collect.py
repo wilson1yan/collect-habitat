@@ -126,6 +126,7 @@ def main(scenes):
         cfg = habitat.get_config()
         cfg.defrost()
         cfg.SIMULATOR.SCENE = scene
+        cfg.SIMULATOR.AGENT_0.RADIUS = 0.01
         cfg.freeze()
 
         sim = habitat.sims.make_sim("Sim-v0", config=cfg.SIMULATOR)
