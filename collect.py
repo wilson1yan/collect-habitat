@@ -167,5 +167,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
-    paths = glob.glob('/shared/wilson/datasets/gibson/*.glb')
+    paths = glob.glob('/shared/wilson/datasets/3d_scenes/hm3d/hm3d-minival-habitat/**/*.glb', recursive=True)
+    print('Found', len(paths))
     main(paths)
