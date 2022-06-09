@@ -10,6 +10,7 @@ import skvideo.io
 import multiprocessing as mp
 import argparse
 import glob
+import random
 
 from habitat.core.simulator import ShortestPathPoint
 from habitat.tasks.nav.nav import NavigationEpisode, NavigationGoal
@@ -64,7 +65,11 @@ def generate_pointnav_episode(
 
     if target_position is None:
         for _retry in range(number_retries_per_target):
-            target_position = sim.sample_navigable_point()
+            for _ in range(1000):
+                target_position = sim.sample_navigable_point()
+                dist = sim.geodesic_distance(source_position, target_position)
+                if args.min_dist <= dist <= args.max_dist:
+                    break
 
             is_compatible, dist = is_compatible_episode(
                 source_position,
@@ -104,15 +109,21 @@ def generate_pointnav_episode(
         radius=shortest_path_success_distance,
         info={"geodesic_distance": None},
     )
-    return episode
+    return episode, target_position
 
 
-def gen_traj(sim, ep_len=500):
-    out = generate_pointnav_episode(sim, source_mode='random')
+def gen_traj(sim, ep_len):
+    out, target_position = generate_pointnav_episode(sim, source_mode='random')
     start_position, start_rotation = out.start_position, out.start_rotation
+    points = [start_position, target_position]
     actions = [point.action for point in out.shortest_paths[0]]
     while len(actions) < ep_len:
-        out = generate_pointnav_episode(sim, source_mode='sim')
+        if len(points) >= args.n_points:
+            target_position = random.choice(points)
+            out, _ = generate_pointnav_episode(sim, source_mode='sim', target_position=target_position)
+        else:
+            out, target_position = generate_pointnav_episode(sim, source_mode='sim')
+            points.append(target_position)
         actions.extend([point.action for point in out.shortest_paths[0]])
     return actions[:ep_len], (start_position, start_rotation)
 
@@ -120,6 +131,7 @@ def gen_traj(sim, ep_len=500):
 def main(scenes):
     total = len(scenes) * args.n_traj
     n = 0
+    pbar = tqdm(total=total)
     for scene in scenes:
         name = osp.basename(scene)[:-4]
 
@@ -127,13 +139,15 @@ def main(scenes):
         cfg.defrost()
         cfg.SIMULATOR.SCENE = scene
         cfg.SIMULATOR.AGENT_0.RADIUS = 0.01
+        cfg.SIMULATOR.RGB_SENSOR.HEIGHT = args.resolution
+        cfg.SIMULATOR.RGB_SENSOR.WIDTH = args.resolution
         cfg.freeze()
 
         sim = habitat.sims.make_sim("Sim-v0", config=cfg.SIMULATOR)
-        sim.seed(args.seed)
+        sim.seed(random.randint(0, 1000000000))
         for i in range(args.n_traj):
             output_path = osp.join(args.output, f'{name}_{i}')
-            actions, (start_position, start_rotation) = gen_traj(sim)
+            actions, (start_position, start_rotation) = gen_traj(sim, args.traj_length)
 
             sim.reset()
             sim.set_agent_state(start_position, start_rotation)
@@ -141,12 +155,6 @@ def main(scenes):
             video = []
             for act in actions:
                 obs = sim.step(act)['rgb']
-                H, W = obs.shape[:2]
-                L = min(H, W)
-                ih = (H - L) // 2
-                iw = (W - L) // 2
-                obs = obs[ih:ih+L, iw:iw+L]
-                obs = cv2.resize(obs, dsize=(args.resolution, args.resolution), interpolation=cv2.INTER_LINEAR)
                 video.append(obs)
             video = np.stack(video, axis=0)
             actions = np.array(actions).astype(np.int32)
@@ -154,19 +162,21 @@ def main(scenes):
             skvideo.io.vwrite(output_path + '.mp4', video)
             np.save(output_path + '.npy', actions)
             n += 1
-
-            print(f'completed {n}/{total}')
+            pbar.update(1)
         sim.close()
+    pbar.close()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', '--n_traj', type=int, default=10)
-    parser.add_argument('-r', '--resolution', type=int, default=256)
+    parser.add_argument('-l', '--traj_length', type=int, default=100)
+    parser.add_argument('-r', '--resolution', type=int, default=128)
+    parser.add_argument('--min_dist', type=float, default=1)
+    parser.add_argument('--max_dist', type=float, default=3)
+    parser.add_argument('--n_points', type=int, default=4)
     parser.add_argument('-o', '--output', type=str, default='/shared/wilson/datasets/habitat_samples')
-    parser.add_argument('-s', '--seed', type=int, default=0)
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
-    paths = glob.glob('/shared/wilson/datasets/3d_scenes/mp3d/**/*.glb', recursive=True)
-    print('Found', len(paths))
+    paths = glob.glob('/shared/wilson/datasets/3d_scenes/**/*.glb', recursive=True)
     main(paths)
