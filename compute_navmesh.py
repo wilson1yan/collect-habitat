@@ -1,6 +1,8 @@
 import os.path as osp
+import sys
 from tqdm import tqdm
 import glob
+import json
 import habitat_sim
 import multiprocessing as mp
 
@@ -81,17 +83,19 @@ def compute_navmesh(scene_path):
     sim = habitat_sim.Simulator(cfg)
     navmesh_success = sim.recompute_navmesh(sim.pathfinder, navmesh_settings, include_static_objects=False)
 
-    #if navmesh_success:
-    #    save_path = scene_path[:-3] + 'navmesh'
-    #    sim.pathfinder.save_nav_mesh(save_path)
+    if navmesh_success:
+        save_path = scene_path[:-3] + 'navmesh'
+        sim.pathfinder.save_nav_mesh(save_path)
+    sim.close()
+    print(f'finished {scene_path} {navmesh_success}')
     return navmesh_success
 
 
 if __name__ == '__main__':
-    scene_paths = glob.glob(osp.join('/shared/wilson/datasets/3d_scenes', '**', '*.glb'), recursive=True)[:100]
+    scene_paths = glob.glob(osp.join(sys.argv[1], '**', '*.glb'), recursive=True)
     print(f'Found {len(scene_paths)} glb files')
 
-    pool = mp.Pool(64)
+    pool = mp.Pool(16)
     results = list(tqdm(pool.imap(compute_navmesh, scene_paths), total=len(scene_paths)))
     failed = [path for path, result in zip(scene_paths, results) if not result]
     print(f'Failed {len(failed)}')

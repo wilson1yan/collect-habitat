@@ -45,11 +45,10 @@ def generate_pointnav_episode(
     sim: "HabitatSim",
     source_mode = 'sim',
     target_position = None,
-    is_gen_shortest_path: bool = True,
     shortest_path_success_distance: float = 0.2,
     shortest_path_max_steps: int = 500,
-    geodesic_to_euclid_min_ratio: float = 1.1,
-    number_retries_per_target: int = 10000,
+    number_retries_per_target: int = 100,
+    keep_same_floor=False,
 ):
     if source_mode == 'sim':
         source_position = sim.agents[0].get_state().position.tolist()
@@ -65,32 +64,24 @@ def generate_pointnav_episode(
         sampled_positions = []
         for _retry in range(number_retries_per_target):
             target_position = sim.sample_navigable_point()
-            is_compatible, dist = is_compatible_episode(
-                source_position,
-                target_position,
-                sim,
-                near_dist=args.min_dist,
-                far_dist=args.max_dist,
-                geodesic_to_euclid_ratio=geodesic_to_euclid_min_ratio,
-            )
-            sampled_positions.append((target_position, sim.geodesic_distance(source_position, target_position)))
-            if is_compatible:
-                break
-        else:
-            raise Exception()
+            if keep_same_floor and np.abs(source_position[1] - target_position[1]) > 0.5:
+                continue
+            dist = sim.geodesic_distance(source_position, target_position)
+            if args.min_dist <= dist <= args.max_dist and dist != np.inf:
+                sampled_positions.append((target_position, sim.geodesic_distance(source_position, target_position)))
+        sampled_positions.sort(key=lambda x: x[1])
+        target_position, dist = random.choice(sampled_positions[-50:])
 
-    shortest_paths = None
-    if is_gen_shortest_path:
-        shortest_paths = [
-            get_action_shortest_path(
-                sim,
-                source_position=source_position,
-                source_rotation=source_rotation,
-                goal_position=target_position,
-                success_distance=shortest_path_success_distance,
-                max_episode_steps=shortest_path_max_steps,
-            )
-        ]
+    shortest_paths = [
+        get_action_shortest_path(
+            sim,
+            source_position=source_position,
+            source_rotation=source_rotation,
+            goal_position=target_position,
+            success_distance=shortest_path_success_distance,
+            max_episode_steps=shortest_path_max_steps,
+        )
+    ]
 
     episode = _create_episode(
         episode_id=0,
@@ -106,7 +97,8 @@ def generate_pointnav_episode(
 
 
 def gen_traj(sim, ep_len):
-    out, target_position = generate_pointnav_episode(sim, source_mode='random')
+    keep_same_floor = random.random() < 0.75
+    out, target_position = generate_pointnav_episode(sim, source_mode='random', keep_same_floor=keep_same_floor)
     start_position, start_rotation = out.start_position, out.start_rotation
     points = [start_position, target_position]
     actions = [point.action for point in out.shortest_paths[0]]
@@ -115,7 +107,8 @@ def gen_traj(sim, ep_len):
             target_position = random.choice(points)
             out, _ = generate_pointnav_episode(sim, source_mode='sim', target_position=target_position)
         else:
-            out, target_position = generate_pointnav_episode(sim, source_mode='sim')
+            keep_same_floor = random.random() < 0.75
+            out, target_position = generate_pointnav_episode(sim, source_mode='sim', keep_same_floor=keep_same_floor)
             points.append(target_position)
         actions.extend([point.action for point in out.shortest_paths[0]])
     return actions[:ep_len], (start_position, start_rotation)
@@ -167,16 +160,16 @@ if __name__ == '__main__':
     parser.add_argument('-n', '--n_traj', type=int, default=160)
     parser.add_argument('--n_chunks', type=int, default=1)
     parser.add_argument('--chunk_idx', type=int, default=0)
-    parser.add_argument('-l', '--traj_length', type=int, default=100)
+    parser.add_argument('-l', '--traj_length', type=int, default=300)
     parser.add_argument('-r', '--resolution', type=int, default=128)
     parser.add_argument('--min_dist', type=float, default=1)
-    parser.add_argument('--max_dist', type=float, default=3)
-    parser.add_argument('--n_points', type=int, default=4)
-    parser.add_argument('-o', '--output', type=str, default='/shared/wilson/datasets/habitat_samples')
+    parser.add_argument('--max_dist', type=float, default=15)
+    parser.add_argument('--n_points', type=int, default=8)
+    parser.add_argument('-o', '--output', type=str, default='/shared/wilson/datasets/habitat_l300')
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
-    paths = glob.glob('/shared/wilson/datasets/3d_scenes/**/*.glb', recursive=True)
+    paths = glob.glob('/shared/wilson/datasets/3d_scenes_old/**/*.glb', recursive=True)
     paths.sort()
 
     paths = np.array_split(paths, args.n_chunks)[args.chunk_idx].tolist()
