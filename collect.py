@@ -165,12 +165,29 @@ if __name__ == '__main__':
     parser.add_argument('--min_dist', type=float, default=1)
     parser.add_argument('--max_dist', type=float, default=15)
     parser.add_argument('--n_points', type=int, default=8)
+    parser.add_argument('--split', type=str, default=None)
     parser.add_argument('-o', '--output', type=str, default='/shared/wilson/datasets/habitat_l300')
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
     paths = glob.glob('/shared/wilson/datasets/3d_scenes_old/**/*.glb', recursive=True)
     paths.sort()
+
+    if args.split is not None:
+        prop = 0.9
+        rng = np.random.default_rng(0)
+        rng.shuffle(paths)
+        if args.split == 'train':
+            paths = paths[:int(len(paths) * prop)]
+        elif args.split == 'test':
+            paths = paths[int(len(paths) * prop):]
+        else:
+            raise Exception(args.split)
+        print(f'split: {args.split}, {paths[:10]}')
+
+        assert len(paths) >= args.n_chunks
+    else:
+        print('No split, using all')
 
     paths = np.array_split(paths, args.n_chunks)[args.chunk_idx].tolist()
 
