@@ -126,6 +126,13 @@ def main(scenes):
         cfg.SIMULATOR.AGENT_0.RADIUS = 0.01
         cfg.SIMULATOR.RGB_SENSOR.HEIGHT = args.resolution
         cfg.SIMULATOR.RGB_SENSOR.WIDTH = args.resolution
+        
+        cfg.SIMULATOR.AGENT_0.SENSORS = ['RGB_SENSOR', 'DEPTH_SENSOR']
+        cfg.SIMULATOR.DEPTH_SENSOR.HEIGHT = args.resolution
+        cfg.SIMULATOR.DEPTH_SENSOR.WIDTH = args.resolution
+        cfg.SIMULATOR.DEPTH_SENSOR.MAX_DEPTH = 100.0
+        cfg.SIMULATOR.DEPTH_SENSOR.MIN_DEPTH = 0.01
+        cfg.SIMULATOR.DEPTH_SENSOR.NORMALIZE_DEPTH = False
         cfg.freeze()
 
         sim = habitat.sims.make_sim("Sim-v0", config=cfg.SIMULATOR)
@@ -141,15 +148,29 @@ def main(scenes):
             sim.reset()
             sim.set_agent_state(start_position, start_rotation)
 
-            video = []
+            video, depths = [], []
+            poss, rots = [], []
             for act in actions:
-                obs = sim.step(act)['rgb']
-                video.append(obs)
+                obs = sim.step(act)
+                rgb, depth = obs['rgb'], obs['depth']
+                state = sim.agents[0].get_state().sensor_states['rgb']
+                pos, rot = state.position, state.rotation
+                rot = quaternion.as_float_array(rot)
+
+                poss.append(pos)
+                rots.append(rot)
+                video.append(rgb)
+                depths.append(depth)
             video = np.stack(video, axis=0)
             actions = np.array(actions).astype(np.int32)
+            poss = np.stack(poss, axis=0)
+            rots = np.stack(rots, axis=0)
 
             skvideo.io.vwrite(output_path + '.mp4', video)
-            np.save(output_path + '.npy', actions)
+            if args.rgb_only:
+                np.savez(output_path + '.npz', actions=actions)
+            else:
+                np.savez(output_path + '.npz', actions=actions, depth=depths, pos=poss, rot=rots)
             i += 1
             pbar.update(1)
         sim.close()
@@ -166,11 +187,12 @@ if __name__ == '__main__':
     parser.add_argument('--max_dist', type=float, default=15)
     parser.add_argument('--n_points', type=int, default=8)
     parser.add_argument('--split', type=str, default=None)
+    parser.add_argument('--rgb_only', action='store_true')
     parser.add_argument('-o', '--output', type=str, default='/shared/wilson/datasets/habitat_l300')
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
-    paths = glob.glob('/shared/wilson/datasets/3d_scenes_old/**/*.glb', recursive=True)
+    paths = glob.glob('3d_scenes/**/*.glb', recursive=True)
     paths.sort()
 
     if args.split is not None:
