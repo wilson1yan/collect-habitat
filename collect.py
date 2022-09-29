@@ -168,9 +168,9 @@ def main(scenes):
 
             skvideo.io.vwrite(output_path + '.mp4', video)
             if args.rgb_only:
-                np.savez(output_path + '.npz', actions=actions)
+                np.savez_compressed(output_path + '.npz', actions=actions)
             else:
-                np.savez(output_path + '.npz', actions=actions, depth=depths, pos=poss, rot=rots)
+                np.savez_compressed(output_path + '.npz', actions=actions, depth=depths, pos=poss, rot=rots)
             i += 1
             pbar.update(1)
         sim.close()
@@ -192,7 +192,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
-    paths = glob.glob('3d_scenes/**/*.glb', recursive=True)
+    paths = glob.glob('/shared/wilson/datasets/3d_scenes_old/**/*.glb', recursive=True)
     paths.sort()
 
     if args.split is not None:
