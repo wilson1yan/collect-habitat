@@ -2,6 +2,8 @@
 
 ## Installation
 
+Note that this requires a GPU, and you make need to install EGL
+
 ```
 conda create -y -n habitat python=3.7 cmake=3.14.0
 conda activate habitat
