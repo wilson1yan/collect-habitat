@@ -1,14 +1,10 @@
-from typing import Dict, Generator, List, Optional, Sequence, Tuple, Union
-import time
+from typing import Dict, List, Optional, Union
 from tqdm import tqdm
 import os
 import os.path as osp
 import habitat
 import numpy as np
-import cv2
-import quaternion
 import skvideo.io
-import multiprocessing as mp
 import argparse
 import glob
 import random
@@ -16,7 +12,6 @@ import random
 from habitat.core.simulator import ShortestPathPoint
 from habitat.tasks.nav.nav import NavigationEpisode, NavigationGoal
 from habitat.datasets.utils import get_action_shortest_path
-from habitat.datasets.pointnav.pointnav_generator import is_compatible_episode
 from habitat.utils.geometry_utils import quaternion_to_list
 
 
@@ -125,14 +120,7 @@ def main(scenes):
         cfg.SIMULATOR.SCENE = scene
         cfg.SIMULATOR.AGENT_0.RADIUS = 0.01
         cfg.SIMULATOR.RGB_SENSOR.HEIGHT = args.resolution
-        cfg.SIMULATOR.RGB_SENSOR.WIDTH = args.resolution
-        
-        cfg.SIMULATOR.AGENT_0.SENSORS = ['RGB_SENSOR', 'DEPTH_SENSOR']
-        cfg.SIMULATOR.DEPTH_SENSOR.HEIGHT = args.resolution
-        cfg.SIMULATOR.DEPTH_SENSOR.WIDTH = args.resolution
-        cfg.SIMULATOR.DEPTH_SENSOR.MAX_DEPTH = 100.0
-        cfg.SIMULATOR.DEPTH_SENSOR.MIN_DEPTH = 0.01
-        cfg.SIMULATOR.DEPTH_SENSOR.NORMALIZE_DEPTH = False
+        cfg.SIMULATOR.RGB_SENSOR.WIDTH = args.resolution 
         cfg.freeze()
 
         sim = habitat.sims.make_sim("Sim-v0", config=cfg.SIMULATOR)
@@ -148,29 +136,15 @@ def main(scenes):
             sim.reset()
             sim.set_agent_state(start_position, start_rotation)
 
-            video, depths = [], []
-            poss, rots = [], []
+            video = []
             for act in actions:
                 obs = sim.step(act)
-                rgb, depth = obs['rgb'], obs['depth']
-                state = sim.agents[0].get_state().sensor_states['rgb']
-                pos, rot = state.position, state.rotation
-                rot = quaternion.as_float_array(rot)
-
-                poss.append(pos)
-                rots.append(rot)
-                video.append(rgb)
-                depths.append(depth)
+                video.append(obs['rgb'])
             video = np.stack(video, axis=0)
             actions = np.array(actions).astype(np.int32)
-            poss = np.stack(poss, axis=0)
-            rots = np.stack(rots, axis=0)
 
             skvideo.io.vwrite(output_path + '.mp4', video)
-            if args.rgb_only:
-                np.savez_compressed(output_path + '.npz', actions=actions)
-            else:
-                np.savez_compressed(output_path + '.npz', actions=actions, depth=depths, pos=poss, rot=rots)
+            np.savez_compressed(output_path + '.npz', actions=actions)
             i += 1
             pbar.update(1)
         sim.close()
@@ -178,6 +152,9 @@ def main(scenes):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('-o', '--output', type=str, required=True)
+    parser.add_argument('-d', '--data', type=str, required=True)
+    
     parser.add_argument('-n', '--n_traj', type=int, default=160)
     parser.add_argument('--n_chunks', type=int, default=1)
     parser.add_argument('--chunk_idx', type=int, default=0)
@@ -186,30 +163,11 @@ if __name__ == '__main__':
     parser.add_argument('--min_dist', type=float, default=1)
     parser.add_argument('--max_dist', type=float, default=15)
     parser.add_argument('--n_points', type=int, default=8)
-    parser.add_argument('--split', type=str, default=None)
-    parser.add_argument('--rgb_only', action='store_true')
-    parser.add_argument('-o', '--output', type=str, default='/shared/wilson/datasets/habitat_l300')
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
-    paths = glob.glob('/shared/wilson/datasets/3d_scenes_old/**/*.glb', recursive=True)
+    paths = glob.glob(osp.join(args.data, '**', '*.glb'), recursive=True)
     paths.sort()
-
-    if args.split is not None:
-        prop = 0.9
-        rng = np.random.default_rng(0)
-        rng.shuffle(paths)
-        if args.split == 'train':
-            paths = paths[:int(len(paths) * prop)]
-        elif args.split == 'test':
-            paths = paths[int(len(paths) * prop):]
-        else:
-            raise Exception(args.split)
-        print(f'split: {args.split}, {paths[:10]}')
-
-        assert len(paths) >= args.n_chunks
-    else:
-        print('No split, using all')
 
     paths = np.array_split(paths, args.n_chunks)[args.chunk_idx].tolist()
 
