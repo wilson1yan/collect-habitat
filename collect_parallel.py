@@ -13,7 +13,7 @@ def worker(i, args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--data_path', type=str, required=True)
-    parser.add_argument('-d', '--output_path', type=str, required=True)
+    parser.add_argument('-o', '--output_path', type=str, required=True)
     parser.add_argument('-n', '--n_traj', type=int, default=160) # per env so total is n_traj * # envs
     parser.add_argument('-l', '--traj_length', type=int, default=300)
     parser.add_argument('-r', '--resolution', type=int, default=128)
