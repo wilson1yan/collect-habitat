@@ -115,11 +115,11 @@ def gen_traj(sim, ep_len):
 
 
 def main():
-    path = '/home/wilson/repos/habitat-sim/scenes/replica/replica.scene_dataset_config.json'
     cfg = habitat.get_config()
     cfg.defrost()
-    import ipdb; ipdb.set_trace()
-    cfg.SIMULATOR.SCENE = scene
+    cfg.SIMULATOR.SCENE = f'scenes/replica/{args.room}/mesh.ply'
+    cfg.SIMULATOR.TURN_ANGLE = 5
+    cfg.SIMULATOR.FORWARD_STEP_SIZE0= 0.125
     cfg.SIMULATOR.AGENT_0.RADIUS = 0.01
     cfg.SIMULATOR.RGB_SENSOR.HEIGHT = args.resolution
     cfg.SIMULATOR.RGB_SENSOR.WIDTH = args.resolution
@@ -135,8 +135,9 @@ def main():
     sim = habitat.sims.make_sim("Sim-v0", config=cfg.SIMULATOR)
     sim.seed(random.randint(0, 1000000000))
     i = 0
+    pbar = tqdm(total=args.n_traj)
     while i < args.n_traj:
-        output_path = osp.join(args.output, f'{name}_{i}')
+        output_path = osp.join(args.output, f'{i:06d}')
         try:
             actions, (start_position, start_rotation) = gen_traj(sim, args.traj_length)
         except Exception:
@@ -171,17 +172,19 @@ def main():
         i += 1
         pbar.update(1)
     sim.close()
+    pbar.close()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-n', '--n_traj', type=int, default=100)
+    parser.add_argument('--room', type=str, default='room_0')
+    parser.add_argument('-n', '--n_traj', type=int, default=10000)
     parser.add_argument('-l', '--traj_length', type=int, default=100)
     parser.add_argument('-r', '--resolution', type=int, default=128)
     parser.add_argument('--min_dist', type=float, default=1)
     parser.add_argument('--max_dist', type=float, default=15)
     parser.add_argument('--n_points', type=int, default=8)
     parser.add_argument('--rgb_only', action='store_true')
-    parser.add_argument('-o', '--output', type=str, default='/shared/wilson/datasets/habitat_l300')
+    parser.add_argument('-o', '--output', type=str, default='/shared/wilson/datasets/replica_room_0_r128')
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
